@@ -1,0 +1,8 @@
+# Arquivos Pesados (Ignorados pelo Git)
+*.zip
+*.faiss
+*.pkl
+biblioteca/
+__pycache__/
+*.env
+.venv/

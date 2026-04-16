@@ -108,6 +108,18 @@
     .sintese-body li { margin-bottom: 4px; }
     .sintese-body strong { color: var(--accent); font-weight: 600; }
 
+    /* Blocos Clínicos (OTOCONSULT) */
+    .clin-block { background: var(--bg-card); border-left: 3px solid var(--border); border-radius: 4px 8px 8px 4px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px; }
+    .clin-block-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .clin-impressao { border-left-color: var(--accent); background: rgba(99,179,237,0.03); }
+    .clin-impressao .clin-block-title { color: var(--accent); }
+    .clin-conduta { border-left-color: var(--green); background: rgba(104,211,145,0.03); }
+    .clin-conduta .clin-block-title { color: var(--green); }
+    .clin-alerta { border-left-color: var(--red); background: rgba(252,129,129,0.08); border-radius: 8px; border: 1px solid rgba(252,129,129,0.2); box-shadow: 0 4px 12px rgba(252,129,129,0.1); }
+    .clin-alerta .clin-block-title { color: var(--red); font-size: 12px; }
+    .clin-default { border-left-color: var(--text-3); }
+    .clin-default .clin-block-title { color: var(--text-2); }
+
     /* Referências colapsáveis */
     .refs-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 10px; user-select: none; }
     .refs-toggle::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -202,13 +214,13 @@
     <div class="results-container" id="resultsContainer">
       <div class="empty-state" id="emptyState">
         <div class="empty-state-icon">🐬</div>
-        <h2>BOTTOK: Consulta Clínica Restrita</h2>
-        <p>Busca semântica avançada em livros e diretrizes de Otorrinolaringologia. A resposta citará os trechos utilizados.</p>
+        <h2>OTOCONSULT: Plataforma de Apoio (RAG)</h2>
+        <p>As análises abaixo são sintetizadas seguindo padrões de Suporte à Decisão Baseado em Evidências (Sinais de alerta, condutas, diferenciais).</p>
         <div class="quick-pills">
-          <span class="pill" onclick="usarPill(this)">Critérios OMA em crianças</span>
-          <span class="pill" onclick="usarPill(this)">Indicação amigdalectomia</span>
-          <span class="pill" onclick="usarPill(this)">Colesteatoma conduta</span>
-          <span class="pill" onclick="usarPill(this)">Sinusite crônica cirurgia</span>
+          <span class="pill" onclick="usarPill(this)">Analisar Caso: Paciente 40a, vertigem e zumbido...</span>
+          <span class="pill" onclick="usarPill(this)">Diagnósticos diferenciais: perdas condutivas</span>
+          <span class="pill" onclick="usarPill(this)">Sinais de alerta: paralisia facial periférica</span>
+          <span class="pill" onclick="usarPill(this)">Protocolo cirúrgico: amigdalectomia pediátrica</span>
         </div>
       </div>
     </div>
@@ -223,6 +235,12 @@
           <button class="topn-btn" onclick="setTopn(8)">8</button>
           <button class="topn-btn" onclick="setTopn(10)">10</button>
         </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <span class="pill" style="font-size:11px; padding:4px 10px;" onclick="usarPill(this)">[CASO] </span>
+        <span class="pill" style="font-size:11px; padding:4px 10px;" onclick="usarPill(this)">Red flags em: </span>
+        <span class="pill" style="font-size:11px; padding:4px 10px;" onclick="usarPill(this)">Exames sugeridos para: </span>
+        <span class="pill" style="font-size:11px; padding:4px 10px;" onclick="usarPill(this)">Tratamento clínico e cirúrgico de: </span>
       </div>
       <div class="input-row">
         <textarea id="queryInput" placeholder="Sua pergunta clínica..." rows="1"
@@ -241,6 +259,7 @@
 
 <script>
   let topnAtual = 4, carregando = false, llmMode = 'none';
+  let acervoCache = []; // lista de livros salva no carregamento
   const API = 'http://localhost:8000';
 
   // STATUS
@@ -256,6 +275,7 @@
         txt.textContent = `${d.total_chunks.toLocaleString()} trechos${mLabel}`;
         document.getElementById('statChunks').textContent = d.total_chunks.toLocaleString();
         document.getElementById('statLivros').textContent = d.n_livros;
+        acervoCache = d.livros || [];
         atualizarTip(llmMode);
         document.getElementById('sendBtn').disabled = false;
       } else {
@@ -282,9 +302,46 @@
     if (box) box.innerHTML = msgs[modo] || msgs.none;
   }
 
-  // Função mantida para n quebrar compatibilidade, mas vazia pq removemos a lista
-  function renderBooks(livros) {
-      // Lista oculta na UI por questão de densidade
+  // Lista oculta na UI por questão de densidade
+  function renderBooks(livros) {}
+
+  // Humaniza nome de arquivo: "otite_media_cronica.pdf" → "Otite Média Crônica"
+  function humanizarNome(nome) {
+    return nome
+      .replace(/\.pdf$/i, '')
+      .replace(/_/g, ' ')
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  }
+
+  // Detecta perguntas sobre o acervo/lista de livros (intenção meta)
+  function ehPerguntaDeAcervo(q) {
+    const p = q.toLowerCase();
+    const termos = ['lista', 'livro', 'acervo', 'referência', 'referencia', 'base de dado',
+                    'quais livros', 'quais referência', 'que livros', 'que referência',
+                    'tem no banco', 'está indexado', 'contém', 'contem', 'disponível', 'disponivel'];
+    return termos.some(t => p.includes(t));
+  }
+
+  // Renderiza lista do acervo direto (sem RAG)
+  function renderAcervo(box) {
+    const sorted = [...acervoCache].sort((a, b) => humanizarNome(a).localeCompare(humanizarNome(b), 'pt'));
+    const itens = sorted.map((nome, i) =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);">
+        <span style="font-size:10px;color:var(--text-3);min-width:22px;text-align:right">${i+1}</span>
+        <span style="font-size:12px;color:var(--text-2)">📖 ${esc(humanizarNome(nome))}</span>
+      </div>`
+    ).join('');
+
+    box.insertAdjacentHTML('beforeend', `
+      <div class="sintese-card" style="margin-bottom:16px">
+        <div class="sintese-header">
+          <div class="sintese-icon">📚</div>
+          <span class="sintese-title">Acervo Indexado — ${acervoCache.length} documentos</span>
+        </div>
+        <div style="max-height:340px;overflow-y:auto;padding-right:4px">${itens}</div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Total: ${document.getElementById('statChunks').textContent} trechos extraídos deste acervo.</div>
+      </div>`);
   }
 
   // BUSCA
@@ -294,13 +351,23 @@
     if (!pergunta || carregando) return;
 
     document.getElementById('emptyState')?.remove();
-    carregando = true;
-    document.getElementById('sendBtn').disabled = true;
     input.value = ''; autoResize(input);
 
     const box = document.getElementById('resultsContainer');
     box.insertAdjacentHTML('beforeend',
       `<div class="query-bubble"><div class="query-text">${esc(pergunta)}</div></div>`);
+
+    // ── Interceptor: pergunta sobre o acervo ──────────────────────────────
+    if (ehPerguntaDeAcervo(pergunta) && acervoCache.length > 0) {
+      renderAcervo(box);
+      box.scrollTop = box.scrollHeight;
+      input.focus();
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
+    carregando = true;
+    document.getElementById('sendBtn').disabled = true;
 
     const loadId = 'load_' + Date.now();
     const temLLM  = llmMode !== 'none';
@@ -387,11 +454,57 @@
   }
 
   function formatSintese(txt) {
-    txt = txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    txt = txt.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
-    txt = txt.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`);
-    txt = txt.replace(/\n\n/g, '</p><p>');
-    return `<p>${txt}</p>`;
+    const topicRegex = /(?:^|\n)(\d+\.\s*\*\*.*?\*\*)/g; // Captura os tópicos estruturados OTOCONSULT
+    
+    // Fallback silencioso (caso o LLM não gere a estrutura indexada)
+    if (!txt.match(topicRegex)) {
+       txt = txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+       txt = txt.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
+       txt = txt.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`);
+       txt = txt.replace(/\n\n/g, '<br><br>');
+       return `<p>${txt}</p>`;
+    }
+
+    // Processamento customizado de blocos
+    const parts = txt.split(topicRegex).map(p => p.trim()).filter(Boolean);
+    let html = '';
+    
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+        const isHeader = part.match(/^\d+\.\s*\*\*(.*?)\*\*/);
+        
+        if (isHeader) {
+            let title = isHeader[1].replace(/:$/, '').trim();
+            let content = (parts[i+1] && !parts[i+1].match(/^\d+\.\s*\*\*/)) ? parts[++i] : "Sem informações.";
+            
+            content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            content = content.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
+            content = content.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul style="margin-left:8px">${m}</ul>`);
+            content = content.replace(/\n\n/g, '<br><br>');
+            
+            let blockClass = 'clin-default';
+            let icon = '📌';
+            let lowTitle = title.toLowerCase();
+            
+            if (lowTitle.includes('impressão')) { blockClass = 'clin-impressao'; icon = '🧑‍⚕️'; }
+            else if (lowTitle.includes('diagnóstico')) { blockClass = 'clin-default'; icon = '🔍'; }
+            else if (lowTitle.includes('exame')) { blockClass = 'clin-default'; icon = '🧪'; }
+            else if (lowTitle.includes('conduta')) { blockClass = 'clin-conduta'; icon = '📋'; }
+            else if (lowTitle.includes('alerta') || lowTitle.includes('red flag')) { blockClass = 'clin-alerta'; icon = '🚨'; }
+            else if (lowTitle.includes('referência')) { blockClass = 'clin-default'; icon = '📖'; }
+            
+            html += `<div class="clin-block ${blockClass}">
+              <div class="clin-block-title">${icon} ${title}</div>
+              <div class="clin-block-content">${content}</div>
+            </div>`;
+        } else {
+            // Introduções puras fora de tópicos
+            part = part.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html += `<div style="margin-bottom:12px; font-weight:500; color:var(--text-2)">${part}</div>`;
+        }
+    }
+    
+    return html;
   }
 
   // HELPERS

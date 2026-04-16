@@ -47,18 +47,43 @@ GROQ_KEY   = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = "llama-3.1-8b-instant"   # mais econômico e rápido do free tier Groq
 # -----------------------------------------------------------------------------
 
-# RAG Prompt (adaptado do MedicalGPT chatpdf.py para pt-BR)
-RAG_PROMPT = """Você é um assistente médico especializado em Otorrinolaringologia.
-Com base EXCLUSIVAMENTE nas referências abaixo extraídas de livros médicos, responda à pergunta clínica de forma clara, estruturada e em português.
-Se a informação não estiver nas referências, diga: "As referências disponíveis não cobrem este tópico com precisão."
-Não invente informações além do que está nas referências.
+# ── Prompts para LLM ─────────────────────────────────────────────────────────
+# Persona fixa enviada como role 'system' — define QUEM o modelo é
+SYSTEM_PROMPT = """Você é OTOCONSULT, um assistente clínico especializado em Otorrinolaringologia, destinado exclusivamente a médicos, atuando como um Assistente de Suporte à Decisão.
 
-REFERÊNCIAS:
+Objetivo:
+Fornecer suporte técnico em avaliação diagnóstica, hipóteses diferenciais, exames complementares, interpretação clínica, condutas terapêuticas, planejamento cirúrgico, seguimento e identificação de sinais de alarme em doenças otorrinolaringológicas, baseado EXCLUSIVAMENTE nas referências indexadas fornecidas.
+
+Regras de comportamento:
+1. Responder em português, em tom formal, técnico e objetivo.
+2. Assumir que o usuário é médico.
+3. Adaptar a resposta aos dados clínicos fornecidos.
+4. Quando houver informações insuficientes, apontar quais dados faltam antes de refinar a conduta.
+5. Sempre estruturar a resposta com os tópicos do formato preferencial.
+6. Priorizar medicina baseada nas evidências contidas no acervo fornecido na consulta atual.
+7. Deixar claro quando uma recomendação depender de diretriz local, disponibilidade de recursos, idade, comorbidades ou contexto perioperatório.
+8. Regra de Segurança RAG: Nunca invente referências ou condutas. Se a informação NÃO estiver contida nas referências, explicite a limitação ("O acervo não possui informações sobre isso").
+9. Quando houver incerteza no acervo, explicite a limitação.
+10. Não substituir avaliação presencial, exames físicos ou laboratoriais determinantes.
+
+Comportamento contextual:
+- Se o usuário enviar um caso clínico ou dúvida pontual, estruture a resposta de acordo com a especialidade em ORL pertinente e os textos de referência.
+- Se houver navegação por menu implícita na mensagem (ex. "menu 1", "opção 2"), apresente as subdivisões clássicas pertinentes em ORL e solicite dados adicionais se necessário.
+- Caso não haja área específica, utilize abordagem geral do diagnóstico e tratamento.
+
+Formato preferencial de saída (SEMPRE inclua estes marcadores se possível):
+1. **Impressão Clínica:**
+2. **Diagnósticos Diferenciais:**
+3. **Exames Sugeridos:**
+4. **Conduta:**
+5. **Alertas:**
+6. **Referências:**"""
+
+# Template enviado como role 'user' — define O QUE processar
+USER_TEMPLATE = """REFERÊNCIAS INDEXADAS:
 {context}
 
-PERGUNTA: {pergunta}
-
-RESPOSTA (em português, estruturada com tópicos quando aplicável):"""
+PERGUNTA CLÍNICA: {pergunta}"""
 
 state = {
     "index":  None,
@@ -131,32 +156,39 @@ async def detectar_llm() -> str:
 
 
 # ── Síntese LLM ──────────────────────────────────────────────────────────────
-async def sintetizar_ollama(prompt: str) -> str:
-    """Chama Ollama local para gerar resposta."""
+async def sintetizar_ollama(contexto: str, pergunta: str) -> str:
+    """Chama Ollama local via /api/chat com roles system/user."""
+    user_content = USER_TEMPLATE.format(context=contexto, pergunta=pergunta)
     async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(f"{OLLAMA_URL}/api/generate", json={
+        r = await client.post(f"{OLLAMA_URL}/api/chat", json={
             "model": OLLAMA_MODEL,
-            "prompt": prompt,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": user_content},
+            ],
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 600},
+            "options": {"temperature": 0.1, "num_predict": 1024},
         })
         r.raise_for_status()
-        return r.json().get("response", "").strip()
+        return r.json()["message"]["content"].strip()
 
 
-async def sintetizar_groq(prompt: str) -> str:
-    """Chama Groq API para gerar resposta."""
+async def sintetizar_groq(contexto: str, pergunta: str) -> str:
+    """Chama Groq API com roles system/user separados corretamente."""
     print(f"[LLM] Solicitando sintese ao Groq (Modelo: {GROQ_MODEL})...")
+    user_content = USER_TEMPLATE.format(context=contexto, pergunta=pergunta)
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
             json={
                 "model": GROQ_MODEL,
-                "messages": [{"role": "system", "content": "Voce e um especialista em Otorrinolaringologia altamente preciso."},
-                             {"role": "user", "content": prompt}],
-                "temperature": 0.2, # Reduzido para maior consistencia e fidelidade
-                "max_tokens": 1024, # Aumentado para lidar com sinteses mais extensas e detalhadas
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_content},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 1024,
                 "top_p": 0.9,
             }
         )
@@ -165,21 +197,20 @@ async def sintetizar_groq(prompt: str) -> str:
 
 
 async def sintetizar(pergunta: str, trechos: list[dict]) -> str | None:
-    """Sintetiza uma resposta coerente a partir dos trechos. Retorna None se sem LLM."""
+    """Monta o contexto RAG e despacha para o LLM disponível."""
     if state["llm_mode"] == "none":
         return None
 
-    context = "\n\n".join(
+    contexto = "\n\n".join(
         f"[Ref {i+1} — {t['fonte'].split('.')[0]}]\n{t['texto']}"
         for i, t in enumerate(trechos)
     )
-    prompt = RAG_PROMPT.format(context=context, pergunta=pergunta)
 
     try:
         if state["llm_mode"] == "ollama":
-            return await sintetizar_ollama(prompt)
+            return await sintetizar_ollama(contexto, pergunta)
         elif state["llm_mode"] == "groq":
-            return await sintetizar_groq(prompt)
+            return await sintetizar_groq(contexto, pergunta)
     except Exception as e:
         print(f"[LLM] Erro na sintese: {e}")
         return None

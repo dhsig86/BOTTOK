@@ -45,7 +45,9 @@ header { position: sticky; top: 0; z-index: 50; background: var(--bg-glass); bac
 main { flex: 1; display: grid; grid-template-columns: 300px 1fr; max-width: 1280px; width: 100%; margin: 0 auto; }
 
 /* Sidebar */
-aside { border-right: 1px solid var(--border); padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; }
+aside { border-right: 1px solid var(--border); padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; max-height: calc(100vh - 65px); }
+aside::-webkit-scrollbar { width: 4px; }
+aside::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .section-label { font-size: 10px; font-weight: 600; letter-spacing: 1px; color: var(--text-3); text-transform: uppercase; margin-bottom: 8px; }
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px; text-align: center; }
@@ -53,6 +55,10 @@ aside { border-right: 1px solid var(--border); padding: 20px 16px; display: flex
 .stat-lbl { font-size: 10px; color: var(--text-3); margin-top: 2px; }
 .tip-box { background: var(--amber-dim); border: 1px solid rgba(246,173,85,0.25); border-radius: var(--radius); padding: 11px 13px; font-size: 11px; color: var(--amber); line-height: 1.6; }
 .tip-box strong { display: block; margin-bottom: 4px; }
+.thematic-menu { display: flex; flex-direction: column; gap: 4px; }
+.thematic-item { display: flex; align-items: center; background: rgba(52, 211, 153, 0.05); border: 1px solid rgba(52, 211, 153, 0.15); border-radius: 6px; padding: 6px 8px; font-size: 11px; color: var(--text-2); cursor: pointer; transition: all 0.2s; }
+.thematic-item:hover { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+.thematic-item-num { font-weight: bold; font-family: monospace; color: var(--accent); background: rgba(52, 211, 153, 0.1); padding: 2px 6px; border-radius: 4px; margin-right: 8px; min-width: 24px; text-align: center; }
 
 /* Chat area */
 .chat-area { display: flex; flex-direction: column; height: calc(100vh - 65px); }

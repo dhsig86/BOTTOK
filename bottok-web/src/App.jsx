@@ -60,6 +60,29 @@ function humanizarNome(nome) {
     .replace(/\b\w/g, l => l.toUpperCase());
 }
 
+const TEMAS = [
+  { n: '1', t: 'Assistente de Diagnóstico' },
+  { n: '2', t: 'Tratamento de Infecção de Ouvido' },
+  { n: '3', t: 'Doenças Nasais e Sinusais' },
+  { n: '4', t: 'Distúrbios da Garganta' },
+  { n: '5', t: 'Cirurgias Otorrinolaringológicas' },
+  { n: '6', t: 'Audiologia e Perda Auditiva' },
+  { n: '7', t: 'Vertigem e Desequilíbrio' },
+  { n: '8', t: 'Alergias Nasais' },
+  { n: '9', t: 'Sono e Apneia' },
+  { n: '10', t: 'Câncer de Cabeça e Pescoço' },
+  { n: '11', t: 'Voz e Fala' },
+  { n: '12', t: 'Pediatria' },
+  { n: '13', t: 'Plástica Facial' },
+  { n: '14', t: 'Emergências' },
+  { n: '15', t: 'Doenças Crônicas' },
+  { n: '16', t: 'Implantes Cocleares' },
+  { n: '17', t: 'Protocolos Conservadores' },
+  { n: '18', t: 'Risco Cirúrgico' },
+  { n: '19', t: 'Novas Tecnologias' },
+  { n: '20', t: 'Atualizações ORL' },
+];
+
 export default function App() {
   const [status, setStatus] = useState({ state: 'carregando', error: null });
   const [stats, setStats] = useState({ total_chunks: '—', n_livros: '—', llm_mode: 'none', livros: [] });
@@ -231,21 +254,39 @@ export default function App() {
       <main>
         <aside>
           <div>
-            <div className="section-label">Acervo Indexado</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-2)', marginBottom: '8px' }}>
-              O acervo contém dezenas de diretrizes, manuais e capítulos sendo executados em background.
+            <div className="section-label">Índice Temático Estratégico</div>
+            <div className="thematic-menu">
+              {TEMAS.map(tema => (
+                <div 
+                  key={tema.n} 
+                  className="thematic-item" 
+                  onClick={() => usarPill(`📚 [TEMA ${tema.n} - ${tema.t}] `)}
+                >
+                  <span className="thematic-item-num">{tema.n}</span>
+                  <span>{tema.t}</span>
+                </div>
+              ))}
+              <div 
+                className="thematic-item" 
+                onClick={() => usarPill(`📚 [OUTROS TEMAS] `)}
+                style={{ marginTop: '4px', borderColor: 'var(--border)', background: 'transparent' }}
+              >
+                <span className="thematic-item-num" style={{color: 'var(--text-3)', background: 'var(--bg-card)'}}>00</span>
+                <span>Outros...</span>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="section-label">Estatísticas</div>
+          
+          <div style={{ marginTop: '10px' }}>
+            <div className="section-label">Estatísticas do Motor</div>
             <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-val">{stats.total_chunks !== '—' ? stats.total_chunks.toLocaleString() : '—'}</div>
-                <div className="stat-lbl">Trechos extraídos</div>
+              <div className="stat-card" style={{ padding: '8px' }}>
+                <div className="stat-val" style={{ fontSize: '15px' }}>{stats.total_chunks !== '—' ? stats.total_chunks.toLocaleString() : '—'}</div>
+                <div className="stat-lbl" style={{ fontSize: '9px' }}>Trechos</div>
               </div>
-              <div className="stat-card">
-                <div className="stat-val">{stats.n_livros}</div>
-                <div className="stat-lbl">Documentos</div>
+              <div className="stat-card" style={{ padding: '8px' }}>
+                <div className="stat-val" style={{ fontSize: '15px' }}>{stats.n_livros}</div>
+                <div className="stat-lbl" style={{ fontSize: '9px' }}>Arquivos</div>
               </div>
             </div>
           </div>

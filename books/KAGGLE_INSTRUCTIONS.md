@@ -20,11 +20,12 @@ Copie CÓDIGO INTEIRO Mágico abaixo e cole no primeiro bloco (célula) que apar
 Em seguida, clique no botão de "Play" ao lado do código (ou aperte `Shift + Enter`).
 
 ```python
-!pip install -q PyPDF2 sentence-transformers faiss-cpu faiss-gpu
+!pip install -q pymupdf sentence-transformers faiss-cpu
 
 import os
 import pickle
-import PyPDF2
+import fitz  # PyMuPDF
+import re
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -37,8 +38,8 @@ INDEX_PATH  = os.path.join(WORKING_DIR, "orl_index.faiss")
 CHUNKS_PATH = os.path.join(WORKING_DIR, "orl_chunks.pkl")
 META_PATH   = os.path.join(WORKING_DIR, "orl_meta.pkl")
 MODEL_NAME  = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_SIZE    = 600
-CHUNK_OVERLAP = 100
+CHUNK_MAX_SIZE  = 1600
+CHUNK_OVERLAP   = 300
 
 def list_pdfs(pasta):
     pdfs = []
@@ -49,36 +50,77 @@ def list_pdfs(pasta):
                 pdfs.append(os.path.join(root, f))
     return sorted(pdfs)
 
+def limpar_texto(texto: str) -> str:
+    # Hífens de quebra de linha: "diag-\nnóstico" -> "diagnóstico"
+    texto = re.sub(r'­\s*\n\s*', '', texto)
+    texto = re.sub(r'-\s*\n\s*([a-záéíóúãõ])', r'\1', texto)
+    # Detecta padrão de caracteres separados por espaço simples: "d i a g n ó s t i c o"
+    if re.search(r'(\b\S{1,2} ){5,}', texto):
+        texto = re.sub(r'\b(\w) (\w) (\w)', r'\1\2\3', texto)
+        texto = re.sub(r'\b(\w) (\w)\b', r'\1\2', texto)
+    # Múltiplas quebras viram parágrafo isolado
+    texto = re.sub(r'\n{3,}', '\n\n', texto)
+    # Quebras de linha isoladas viram espaço normal (não quebra a frase ao meio)
+    texto = re.sub(r'(?<!\n)\n(?!\n)', ' ', texto)
+    # Múltiplos espaços viram espaço normal
+    texto = re.sub(r'[ \t]{2,}', ' ', texto)
+    return texto.strip()
+
 def extrair_texto_pdf(caminho):
     nome = os.path.basename(caminho)
     print(f"[LENDO] {nome}")
     paginas = []
     try:
-        with open(caminho, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                try:
-                    texto = page.extract_text()
-                    if texto:
-                        paginas.append(texto.strip())
-                except:
-                    pass
+        pdf_document = fitz.open(caminho)
+        for page_num in range(len(pdf_document)):
+            page = pdf_document.load_page(page_num)
+            texto = page.get_text("text") or ""
+            texto = limpar_texto(texto)
+            if texto:
+                paginas.append(texto)
+        pdf_document.close()
     except Exception as e:
-        print(f"[ERRO] Falha ao ler {nome}: {e}")
+        print(f"[ERRO] Falha ao ler {nome}: {e} (Tentando ignoar artefacto corrompido)")
     return paginas
 
-def criar_chunks(paginas, chunk_size, overlap, fonte):
-    texto = "\n".join(paginas)
+def criar_chunks_inteligentes(paginas, max_size, overlap, fonte):
+    texto_completo = "\n\n".join(paginas)
+    paragrafos = re.split(r'\n\n+', texto_completo)
+    
     chunks = []
     metas = []
-    inicio = 0
-    while inicio < len(texto):
-        fim = inicio + chunk_size
-        chunk = texto[inicio:fim].strip()
-        if chunk:
-            chunks.append(chunk)
+    bloco_atual = ""
+    
+    for para in paragrafos:
+        para = para.strip()
+        if not para:
+            continue
+            
+        if len(para) > max_size:
+            # Dividir paragrafo monstruoso por pontos
+            frases = re.split(r'(?<=[.!?])\s+', para)
+            for frase in frases:
+                if len(bloco_atual) + len(frase) <= max_size:
+                    bloco_atual += (" " + frase if bloco_atual else frase)
+                else:
+                    if bloco_atual:
+                        chunks.append(bloco_atual.strip())
+                        metas.append(fonte)
+                    bloco_atual = frase
+            continue
+            
+        if len(bloco_atual) + len(para) <= max_size:
+            bloco_atual += ("\n\n" + para if bloco_atual else para)
+        else:
+            chunks.append(bloco_atual.strip())
             metas.append(fonte)
-        inicio += chunk_size - overlap
+            # Para o overlap de parágrafo estrutural, usamos o bloco que ultrapassou o limite como o início (frequentemente com 200 a 400 chars)
+            bloco_atual = para
+            
+    if bloco_atual:
+        chunks.append(bloco_atual.strip())
+        metas.append(fonte)
+        
     return chunks, metas
 
 print("1. Mapeando PDFs vindos do seu Dataset...")
@@ -93,11 +135,11 @@ else:
     for pdf in pdfs:
          paginas = extrair_texto_pdf(pdf)
          if paginas:
-             chunks, metas = criar_chunks(paginas, CHUNK_SIZE, CHUNK_OVERLAP, os.path.basename(pdf))
+             chunks, metas = criar_chunks_inteligentes(paginas, CHUNK_MAX_SIZE, CHUNK_OVERLAP, os.path.basename(pdf))
              todos_chunks.extend(chunks)
              todos_metas.extend(metas)
              
-    print(f"\n[INFO] {len(todos_chunks)} blocos médicos criados.")
+    print(f"\n[INFO] {len(todos_chunks)} blocos médicos criados com semântica robusa.")
     
     print("\n2. 🔥 ACENDENDO MOTORES DA GPU PARA GERAR OS VETORES (EMBEDDINGS)...")
     # Usa a GPU alocada pelo Kaggle

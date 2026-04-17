@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-indexar_livro.py  (v2 — multi-livro)
-=====================================
+indexar_livro.py  (v3 — multi-livro e chunking semântico)
+=========================================================
 Escaneia TODOS os PDFs da pasta books/ e cria um indice vetorial unificado.
-Execute este script sempre que adicionar novos livros.
+Usa limpeza Regex, chunking semantico (respeita quebras de frase) 
+e tamanho maximo de 1600 caracteres para RAG profundo.
 
 Para re-indexar do zero, delete:
   - orl_index.faiss
@@ -16,7 +17,8 @@ Uso:
 import os
 import sys
 import pickle
-import PyPDF2
+import fitz # PyMuPDF
+import re
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -32,8 +34,8 @@ INDEX_PATH  = os.path.join(BOOKS_DIR, "orl_index.faiss")
 CHUNKS_PATH = os.path.join(BOOKS_DIR, "orl_chunks.pkl")
 META_PATH   = os.path.join(BOOKS_DIR, "orl_meta.pkl")   # guarda de qual livro vem cada chunk
 MODEL_NAME  = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_SIZE    = 600   # aumentado para melhor contexto
-CHUNK_OVERLAP = 100
+CHUNK_MAX_SIZE = 1600   # aumentado para melhor contexto semântico do LLM
+CHUNK_OVERLAP  = 300
 # Arquivos a ignorar (nao sao livros)
 IGNORAR = {"indexar_livro.py", "perguntar.py"}
 # -----------------------------------------------------------------------------
@@ -46,6 +48,21 @@ def listar_pdfs(pasta: str) -> list[str]:
             pdfs.append(os.path.join(pasta, f))
     return pdfs
 
+def limpar_texto(texto: str) -> str:
+    # Hífens de quebra de linha: "diag-\nnóstico" -> "diagnóstico"
+    texto = re.sub(r'-\s*\n\s*([a-záéíóúãõ])', r'\1', texto)
+    texto = re.sub(r'­\s*\n\s*', '', texto)
+    # Detecta padrão de caracteres separados por espaço simples: "d i a g n ó s t i c o"
+    if re.search(r'(\b\S{1,2} ){5,}', texto):
+        texto = re.sub(r'\b(\w) (\w) (\w)', r'\1\2\3', texto)
+        texto = re.sub(r'\b(\w) (\w)\b', r'\1\2', texto)
+    # Múltiplas quebras viram parágrafo isolado
+    texto = re.sub(r'\n{3,}', '\n\n', texto)
+    # Quebras de linha isoladas viram espaço normal
+    texto = re.sub(r'(?<!\n)\n(?!\n)', ' ', texto)
+    # Múltiplos espaços viram espaço normal
+    texto = re.sub(r'[ \t]{2,}', ' ', texto)
+    return texto.strip()
 
 def extrair_texto_pdf(caminho: str) -> list[str]:
     """Extrai texto de todas as paginas do PDF."""
@@ -53,41 +70,66 @@ def extrair_texto_pdf(caminho: str) -> list[str]:
     print(f"\n  [LENDO] {nome}")
     paginas = []
     try:
-        with open(caminho, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            total = len(reader.pages)
-            print(f"  -> Total de paginas: {total}")
-            for i, page in enumerate(reader.pages):
-                try:
-                    texto = page.extract_text() or ""
-                    texto = texto.strip()
-                    if texto:
-                        paginas.append(texto)
-                except Exception as ex_page:
-                    print(f"  [AVISO] Ignorando pagina {i+1} corrompida: {ex_page}")
-                if (i + 1) % 100 == 0:
-                    print(f"  -> Lidas: {i+1}/{total}")
+        pdf_document = fitz.open(caminho)
+        total = len(pdf_document)
+        print(f"  -> Total de paginas: {total}")
+        for page_num in range(total):
+            try:
+                page = pdf_document.load_page(page_num)
+                texto = page.get_text("text") or ""
+                texto = limpar_texto(texto)
+                if texto:
+                    paginas.append(texto)
+            except Exception as ex_page:
+                print(f"  [AVISO] Ignorando pagina {page_num+1} corrompida: {ex_page}")
+            if (page_num + 1) % 100 == 0:
+                print(f"  -> Lidas: {page_num+1}/{total}")
+        pdf_document.close()
         print(f"  [OK] Paginas com texto extraido: {len(paginas)}/{total}")
     except Exception as e:
         print(f"  [ERRO] Falha ao ler {nome}: {e}")
     return paginas
 
-
-def criar_chunks(paginas: list[str], chunk_size: int, overlap: int, fonte: str) -> tuple[list[str], list[str]]:
-    """Divide o texto em pedacos menores. Retorna (chunks, metadados_fonte)."""
-    texto_completo = "\n".join(paginas)
+def criar_chunks_inteligentes(paginas: list[str], max_size: int, overlap: int, fonte: str) -> tuple[list[str], list[str]]:
+    """Divide o texto com quebras semanticas. Retorna (chunks, metadados_fonte)."""
+    texto_completo = "\n\n".join(paginas)
+    paragrafos = re.split(r'\n\n+', texto_completo)
+    
     chunks = []
-    metas  = []
-    inicio = 0
-    while inicio < len(texto_completo):
-        fim   = inicio + chunk_size
-        chunk = texto_completo[inicio:fim].strip()
-        if chunk:
-            chunks.append(chunk)
+    metas = []
+    bloco_atual = ""
+    
+    for para in paragrafos:
+        para = para.strip()
+        if not para:
+            continue
+            
+        if len(para) > max_size:
+            # Dividir paragrafo monstruoso por pontos
+            frases = re.split(r'(?<=[.!?])\s+', para)
+            for frase in frases:
+                if len(bloco_atual) + len(frase) <= max_size:
+                    bloco_atual += (" " + frase if bloco_atual else frase)
+                else:
+                    if bloco_atual:
+                        chunks.append(bloco_atual.strip())
+                        metas.append(fonte)
+                    bloco_atual = frase
+            continue
+            
+        if len(bloco_atual) + len(para) <= max_size:
+            bloco_atual += ("\n\n" + para if bloco_atual else para)
+        else:
+            chunks.append(bloco_atual.strip())
             metas.append(fonte)
-        inicio += chunk_size - overlap
+            # overlap estrutural
+            bloco_atual = para
+            
+    if bloco_atual:
+        chunks.append(bloco_atual.strip())
+        metas.append(fonte)
+        
     return chunks, metas
-
 
 def gerar_embeddings(chunks: list[str], model_name: str):
     """Gera embeddings para todos os chunks."""
@@ -102,7 +144,6 @@ def gerar_embeddings(chunks: list[str], model_name: str):
     )
     return np.array(embeddings, dtype="float32")
 
-
 def main():
     if not os.path.exists(BIBLIOTECA_DIR):
         os.makedirs(BIBLIOTECA_DIR)
@@ -112,7 +153,7 @@ def main():
         print("[ERRO] Nenhum PDF encontrado na pasta books/biblioteca/")
         return
 
-    print(f"=== OTTO ORL — Indexador Multi-Livro (v2) ===")
+    print(f"=== OTTO ORL — Indexador Multi-Livro (v3 Semântico) ===")
     print(f"Livros encontrados: {len(pdfs)}")
     for p in pdfs:
         print(f"  - {os.path.basename(p)}")
@@ -132,7 +173,7 @@ def main():
         paginas = extrair_texto_pdf(pdf_path)
         if not paginas:
             continue
-        chunks, metas = criar_chunks(paginas, CHUNK_SIZE, CHUNK_OVERLAP, fonte=nome)
+        chunks, metas = criar_chunks_inteligentes(paginas, CHUNK_MAX_SIZE, CHUNK_OVERLAP, fonte=nome)
         todos_chunks.extend(chunks)
         todos_metas.extend(metas)
         print(f"  -> {len(chunks)} chunks gerados de '{nome}'")
@@ -157,8 +198,7 @@ def main():
     print(f"[OK] Salvo: {INDEX_PATH}")
     print(f"[OK] Salvo: {CHUNKS_PATH}")
     print(f"[OK] Salvo: {META_PATH}")
-    print(f"\n[PRONTO] Execute: python books/perguntar.py")
-
+    print(f"\n[PRONTO] Sistema Atualizado com Chunking Semântico!")
 
 if __name__ == "__main__":
     main()

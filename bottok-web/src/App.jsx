@@ -88,8 +88,10 @@ export default function App() {
   const [stats, setStats] = useState({ total_chunks: '—', n_livros: '—', llm_mode: 'none', livros: [] });
   const [history, setHistory] = useState([]);
   const [query, setQuery] = useState('');
-  const [topn, setTopn] = useState(4);
+  const [contextoTema, setContextoTema] = useState(null); // Armazena o tema selecionado
+  const [topn, setTopn] = useState(6); // Default 6
   const [buscando, setBuscando] = useState(false);
+  const [focused, setFocused] = useState(false);
   const resultsRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -136,21 +138,20 @@ export default function App() {
 
   const autoResize = (e) => {
     e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 130) + 'px';
-  };
-
-  const usarPill = (txt) => {
-    setQuery(txt);
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px';
   };
 
   const handleKey = (e) => {
-    if (e.ctrlKey && e.key === 'Enter') {
+    // Nova regra: Enter envia. Shift+Enter quebra linha.
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       buscar();
     }
+  };
+
+  const selecionarTema = (tema) => {
+    setContextoTema(tema);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const buscar = async () => {
@@ -158,11 +159,11 @@ export default function App() {
     if (!pergunta || buscando || status.state !== 'ok') return;
 
     setQuery('');
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
+    if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    const newQueryItem = { type: 'query', text: pergunta };
+    // UI payload
+    const finalQuestionText = contextoTema ? `[Tema: ${contextoTema.t}] ${pergunta}` : pergunta;
+    const newQueryItem = { type: 'query', text: pergunta, temaVisual: contextoTema?.t };
 
     if (ehPerguntaDeAcervo(pergunta) && stats.livros.length > 0) {
       setHistory(prev => [...prev, newQueryItem, { type: 'acervo' }]);
@@ -174,10 +175,11 @@ export default function App() {
     setBuscando(true);
 
     try {
+      // Backend request
       const res = await fetch(`${API}/buscar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pergunta, topn, sintetizar: true })
+        body: JSON.stringify({ pergunta: finalQuestionText, topn, sintetizar: true })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Erro na busca');
@@ -232,194 +234,142 @@ export default function App() {
   };
 
   return (
-    <>
-      <header>
-        <div className="logo">
+    <div className="claude-layout">
+      
+      {/* Sidebar Lateral */}
+      <aside className="claude-sidebar">
+        <div className="logo-container">
           <div className="logo-icon">🐬</div>
-          <div>
-            <div className="logo-text">BOTTOK</div>
-            <div className="logo-sub">Consultor de Literatura Médica</div>
+          <div className="logo-title">OTOCONSULT RAG</div>
+        </div>
+
+        <div className="section-title">Filtro Clínico (Tema)</div>
+        <div className="thematic-menu">
+          {TEMAS.map(tema => (
+            <div 
+              key={tema.n} 
+              className={`thematic-item ${contextoTema?.n === tema.n ? 'active' : ''}`}
+              onClick={() => selecionarTema(tema)}
+            >
+              <span className="thematic-item-num">{tema.n}</span>
+              <span>{tema.t}</span>
+            </div>
+          ))}
+          <div 
+            className={`thematic-item ${contextoTema?.n === '00' ? 'active' : ''}`}
+            onClick={() => selecionarTema({n:'00', t:'Geral'})}
+            style={{ marginTop: '8px', borderTop: '1px solid var(--border)', borderRadius: '0' }}
+          >
+            <span className="thematic-item-num" style={{ background: 'transparent', border: 'none' }}>00</span>
+            <span>Sem Filtro (Livre)</span>
           </div>
         </div>
-        <div className="status-badge">
-          <div className={`status-dot ${status.state}`}></div>
-          <span>
-            {status.state === 'carregando' && (status.error || 'Carregando...')}
-            {status.state === 'erro' && status.error}
-            {status.state === 'ok' && `${stats.total_chunks.toLocaleString()} trechos${stats.llm_mode === 'none' ? '' : ' · ' + stats.llm_mode}`}
-          </span>
+
+        <div className="section-title" style={{ marginTop: '30px' }}>Estatísticas da Base</div>
+        <div className="stat-box">
+          <span>Trechos Extraídos</span>
+          <strong>{stats.total_chunks}</strong>
         </div>
-      </header>
+        <div className="stat-box">
+          <span>Obras Avaliadas</span>
+          <strong>{stats.n_livros}</strong>
+        </div>
+      </aside>
 
-      <main>
-        <aside>
-          <div>
-            <div className="section-label">Índice Temático Estratégico</div>
-            <div className="thematic-menu">
-              {TEMAS.map(tema => (
-                <div 
-                  key={tema.n} 
-                  className="thematic-item" 
-                  onClick={() => usarPill(`📚 [TEMA ${tema.n} - ${tema.t}] `)}
-                >
-                  <span className="thematic-item-num">{tema.n}</span>
-                  <span>{tema.t}</span>
-                </div>
-              ))}
-              <div 
-                className="thematic-item" 
-                onClick={() => usarPill(`📚 [OUTROS TEMAS] `)}
-                style={{ marginTop: '4px', borderColor: 'var(--border)', background: 'transparent' }}
-              >
-                <span className="thematic-item-num" style={{color: 'var(--text-3)', background: 'var(--bg-card)'}}>00</span>
-                <span>Outros...</span>
-              </div>
+      {/* Main Área Estilo Claude */}
+      <main className="claude-main">
+        <div className="status-indicator">
+           <div className={`dot ${status.state}`}></div>
+           {status.state === 'carregando' ? status.error || 'Aguardando Servidor...' : 'Online & Conectado'}
+        </div>
+
+        <div className="claude-chat-history" ref={resultsRef}>
+          {history.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-state-icon">🐬</div>
+              <h2>Como posso te ajudar hoje doutor?</h2>
+              <p>O OTOCONSULT pesquisa diretamente em livros didáticos de residentes e manuais técnicos para formatar sua conduta. Selecione um TEMA na lateral para guiar a lógica matemática de varredura.</p>
             </div>
-          </div>
-          
-          <div style={{ marginTop: '10px' }}>
-            <div className="section-label">Estatísticas do Motor</div>
-            <div className="stats-grid">
-              <div className="stat-card" style={{ padding: '8px' }}>
-                <div className="stat-val" style={{ fontSize: '15px' }}>{stats.total_chunks !== '—' ? stats.total_chunks.toLocaleString() : '—'}</div>
-                <div className="stat-lbl" style={{ fontSize: '9px' }}>Trechos</div>
-              </div>
-              <div className="stat-card" style={{ padding: '8px' }}>
-                <div className="stat-val" style={{ fontSize: '15px' }}>{stats.n_livros}</div>
-                <div className="stat-lbl" style={{ fontSize: '9px' }}>Arquivos</div>
-              </div>
-            </div>
-          </div>
-          <div className="tip-box">
-            {getTipText()}
-          </div>
-        </aside>
+          )}
 
-        <div className="chat-area">
-          <div className="results-container" ref={resultsRef}>
-            {history.length === 0 && (
-              <div className="empty-state">
-                <div className="empty-state-icon">🐬</div>
-                <h2>OTOCONSULT: Plataforma de Apoio (RAG)</h2>
-                <p>As análises abaixo são sintetizadas seguindo padrões de Suporte à Decisão Baseado em Evidências (Sinais de alerta, condutas, diferenciais).</p>
-                <div className="quick-pills">
-                  <span className="pill" onClick={() => usarPill('Analisar Caso: Paciente 40a, vertigem e zumbido...')}>Analisar Caso: Paciente 40a, vertigem e zumbido...</span>
-                  <span className="pill" onClick={() => usarPill('Diagnósticos diferenciais: perdas condutivas')}>Diagnósticos diferenciais: perdas condutivas</span>
-                  <span className="pill" onClick={() => usarPill('Sinais de alerta: paralisia facial periférica')}>Sinais de alerta: paralisia facial periférica</span>
-                  <span className="pill" onClick={() => usarPill('Protocolo cirúrgico: amigdalectomia pediátrica')}>Protocolo cirúrgico: amigdalectomia pediátrica</span>
+          {history.map((item, idx) => {
+            if (item.type === 'query') {
+              return (
+                <div key={idx} className="message-wrapper message-user">
+                  <div className="bubble">
+                    {item.temaVisual && <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent)', marginBottom: '4px' }}>[Foco: {item.temaVisual}]</div>}
+                    {item.text}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {history.map((item, idx) => {
-              if (item.type === 'query') {
-                return (
-                  <div key={idx} className="query-bubble">
-                    <div className="query-text">{item.text}</div>
-                  </div>
-                );
-              }
-              if (item.type === 'error') {
-                return (
-                  <div key={idx} className="disclaimer" style={{ marginBottom: '14px' }}>
-                    ⚠️ <span>{item.message}</span>
-                  </div>
-                );
-              }
-              if (item.type === 'acervo') {
-                const sorted = [...stats.livros].sort((a, b) => humanizarNome(a).localeCompare(humanizarNome(b), 'pt'));
-                return (
-                  <div key={idx} className="sintese-card" style={{ marginBottom: '16px' }}>
-                    <div className="sintese-header">
-                      <div className="sintese-icon">📚</div>
-                      <span className="sintese-title">Acervo Indexado — {stats.livros.length} documentos</span>
-                    </div>
-                    <div style={{ maxHeight: '340px', overflowY: 'auto', paddingRight: '4px' }}>
-                      {sorted.map((nome, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
-                          <span style={{ fontSize: '10px', color: 'var(--text-3)', minWidth: '22px', textAlign: 'right' }}>{i + 1}</span>
-                          <span style={{ fontSize: '12px', color: 'var(--text-2)' }}>📖 {humanizarNome(nome)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-3)' }}>
-                      Total: {stats.total_chunks.toLocaleString()} trechos extraídos deste acervo.
-                    </div>
-                  </div>
-                );
-              }
-              if (item.type === 'response') {
-                const { data } = item;
-                const cls = { ollama: 'llm-ollama', groq: 'llm-groq', none: 'llm-none' }[data.llm_usado] || 'llm-none';
-                const label = { ollama: 'Ollama local', groq: 'Groq API', none: '' }[data.llm_usado] || '';
-                return (
-                  <div key={idx}>
-                    {data.sintese && (
-                      <div className="sintese-card">
-                        <div className="sintese-header">
-                          <div className="sintese-icon">🧠</div>
-                          <span className="sintese-title">Resposta Sintetizada</span>
-                          <span className={`llm-badge ${cls}`}>{label}</span>
-                        </div>
-                        <div className="sintese-body" dangerouslySetInnerHTML={{ __html: formatSintese(data.sintese) }} />
-                      </div>
+              );
+            }
+            if (item.type === 'error') {
+              return (
+                <div key={idx} className="message-wrapper message-ai">
+                  <div className="ai-avatar" style={{background: '#ef4444'}}>!</div>
+                  <div className="ai-content" style={{color: '#ef4444'}}>Erro de Conexão: {item.message}</div>
+                </div>
+              );
+            }
+            if (item.type === 'response') {
+              const { data } = item;
+              return (
+                <div key={idx} className="message-wrapper message-ai">
+                  <div className="ai-avatar">OT</div>
+                  <div className="ai-content">
+                    {data.sintese ? (
+                      <div dangerouslySetInnerHTML={{ __html: formatSintese(data.sintese) }} />
+                    ) : (
+                       <span>Buscando diretamente no acervo...</span>
                     )}
                     {renderRefs(data.resultados)}
-                    <div className="disclaimer">
-                      ⚠️ <span>Baseado exclusivamente nos livros indexados. Não constitui prescrição médica. Valide com diretrizes atualizadas e julgamento clínico.</span>
-                    </div>
                   </div>
-                );
-              }
-              return null;
-            })}
-
-            {buscando && (
-              <div className="loading-card">
-                <div className="spinner"></div>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-1)' }}>{stats.llm_mode !== 'none' ? 'Buscando e sintetizando...' : 'Buscando referências...'}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{stats.total_chunks.toLocaleString()} trechos{stats.llm_mode !== 'none' ? ' · ' + stats.llm_mode.toUpperCase() : ''}</div>
                 </div>
-              </div>
-            )}
-          </div>
+              );
+            }
+            return null;
+          })}
 
-          <div className="input-area">
-            <div className="topn-row">
-              <span className="topn-label">Puxar quantas referências por resposta?</span>
-              <div className="topn-btns">
-                {[2, 4, 6, 8, 10].map(n => (
-                  <button key={n} className={`topn-btn ${topn === n ? 'active' : ''}`} onClick={() => setTopn(n)}>{n}</button>
-                ))}
-              </div>
+          {buscando && (
+            <div className="message-wrapper message-ai" style={{ opacity: 0.7 }}>
+              <div className="ai-avatar" style={{ animation: 'blink 1.5s infinite'}}>...</div>
+              <div className="ai-content">Ponderando referências em {stats.n_livros} obras...</div>
             </div>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-              <span className="pill" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => usarPill('[CASO] ')}>[CASO]</span>
-              <span className="pill" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => usarPill('Red flags em: ')}>Red flags em:</span>
-              <span className="pill" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => usarPill('Exames sugeridos para: ')}>Exames sugeridos para:</span>
-              <span className="pill" style={{ fontSize: '11px', padding: '4px 10px' }} onClick={() => usarPill('Tratamento clínico e cirúrgico de: ')}>Tratamento clínico e cirúrgico de:</span>
-            </div>
-            <div className="input-row">
-              <textarea
-                ref={inputRef}
-                value={query}
-                onChange={e => { setQuery(e.target.value); autoResize(e); }}
-                onKeyDown={handleKey}
-                placeholder="Sua pergunta clínica..."
-                rows="1"
-              ></textarea>
-              <button className="btn-send" onClick={buscar} disabled={buscando || status.state !== 'ok'} title="Ctrl+Enter">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-              </button>
-            </div>
-            <div className="help-text">Ctrl+Enter para enviar &nbsp;·&nbsp; Respostas baseadas no Acervo &nbsp;·&nbsp; Confirme sempre com julgamento clínico</div>
+          )}
+        </div>
+
+        <div className="input-anchored">
+          <div className={`input-wrapper ${focused ? 'focused' : ''}`}>
+             {contextoTema && (
+               <div className="context-badge">
+                 Filtro Ativo: {contextoTema.t}
+                 <span className="context-close" onClick={() => setContextoTema(null)}>✕</span>
+               </div>
+             )}
+             <div className="input-row">
+                <textarea
+                  ref={inputRef}
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); autoResize(e); }}
+                  onKeyDown={handleKey}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  placeholder="Escreva seu caso ou dúvida técnica..."
+                  rows="1"
+                ></textarea>
+                <button className="btn-send" onClick={buscar} disabled={buscando || status.state !== 'ok' || (!query.trim())}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+             </div>
           </div>
         </div>
+        <div className="input-hint" style={{ position: 'absolute', bottom: '8px', width: '100%', left: 0 }}>
+          Pressione Enter para buscar. Shift + Enter para quebrar linha. O OTOCONSULT pode cometer erros. Revise condutas.
+        </div>
       </main>
-    </>
+    </div>
   );
 }

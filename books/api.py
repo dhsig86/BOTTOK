@@ -40,6 +40,7 @@ INDEX_PATH  = BASE_DIR / "orl_index.faiss"
 CHUNKS_PATH = BASE_DIR / "orl_chunks.pkl"
 META_PATH   = BASE_DIR / "orl_meta.pkl"
 MODEL_NAME  = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+RERANKER_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 # LLM config
 OLLAMA_URL  = "http://localhost:11434"
 OLLAMA_MODEL = "phi3:mini"          # troque por llama3.2:3b se preferir
@@ -56,7 +57,10 @@ Sua missão é responder à dúvida clínica formatando e sumarizando APENAS as 
 1. TOM E POSTURA: Expresse-se como um médico especialista chefe formal, direto, sem saudações desnecessárias. Vá direto ao ponto. 
 2. CITAÇÃO ESTRITA: É absolutamente proibido inventar diagnósticos, tratamentos ou citar literaturas que não estão listadas nas referências abaixo. Se a informação não constar explicitamente no contexto, declare com clareza: "Com base no acervo disponibilizado, não foi encontrada essa informação."
 3. FOCO: Leia a pergunta e determine qual a necessidade (lista de diferenciais, procedimento cirúrgico, posologia). 
-4. ESTRUTURA VISUAL: Responda usando Markdown limpo. Use listas de pontos (bullet points) ou formato estruturado sempre que possível para facilitar a leitura rápida de outro médico. Se houver alertas perigosos (Red Flags), use **[ALERTA CLÍNICO]**.
+4. ESTRUTURA VISUAL: Responda usando Markdown impecável.
+   - Use formatação de blockquotes do GitHub para alertas severos de conduta, como `> [!WARNING]` seguido de **ALERTA CLÍNICO:**.
+   - Use `> [!NOTE]` para observações.
+   - Use listas e negrito. Nunca misture estilos de forma errática.
 
 [DADOS]
 Baseie toda e qualquer afirmação unicamente nas evidências expostas abaixo. Sintentize, mas nunca extrapole."""
@@ -72,6 +76,7 @@ state = {
     "chunks": None,
     "metas":  None,
     "modelo": None,
+    "reranker": None,
     "pronto": False,
     "erro":   None,
     "llm_mode": None,  # "ollama" | "groq" | "none"
@@ -201,7 +206,7 @@ async def sintetizar(pergunta: str, trechos: list[dict]) -> str | None:
 # ── Startup ──────────────────────────────────────────────────────────────────
 def carregar_tudo():
     import faiss
-    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import SentenceTransformer, CrossEncoder
     from collections import Counter
     import time
 
@@ -233,8 +238,11 @@ def carregar_tudo():
         
     print(f"[STARTUP] TOTAL CARREGADO: {state['index'].ntotal} chunks de {n_livros} livro(s).")
     print(f"[STARTUP] Carregando modelo NLP '{MODEL_NAME}' para embeddings de query...")
-    
     state["modelo"] = SentenceTransformer(MODEL_NAME)
+    
+    print(f"[STARTUP] Carregando Cross-Encoder '{RERANKER_NAME}' para refino de busca...")
+    state["reranker"] = CrossEncoder(RERANKER_NAME)
+    
     state["pronto"] = True
     
     elapsed = time.time() - start_time
@@ -249,13 +257,14 @@ async def lifespan(app: FastAPI):
 
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
-app = FastAPI(title="OTTO ORL API", version="3.0 - Vercel Ready", lifespan=lifespan)
+app = FastAPI(title="OTTO ORL API", version="4.0 - Rerank Ready", lifespan=lifespan)
 
 # Restringindo CORS: Habilitando localhost (dev) e urls de Vercel/Render
 CORS_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
     "http://localhost:3000",
+    "http://localhost:5173",
     "http://localhost:8000",
     "*"  # TODO: Trocar '*' pela url definitiva do Vercel quando for publicado
 ]
@@ -295,7 +304,7 @@ class ConsultaResponse(BaseModel):
 @app.get("/", include_in_schema=False)
 async def root():
     return JSONResponse({
-        "status": "OTTO ORL API (Fase 2)",
+        "status": "OTTO ORL API (V4 com CrossEncoder)",
         "mensagem": "Servidor backend independente. Acesse a interface Frontend pelo Vercel ou via Live Server.",
         "docs": "/docs"
     })
@@ -325,16 +334,44 @@ async def buscar(req: ConsultaRequest):
         raise HTTPException(400, "Pergunta vazia.")
 
     topn = max(1, min(req.topn, 12))
+    topn_amplo = topn * 4  # Resgata mais candidatos para o ReRanker filtrar
+    
     emb  = state["modelo"].encode([req.pergunta], convert_to_numpy=True).astype("float32")
-    dists, idxs = state["index"].search(emb, topn)
+    dists, idxs = state["index"].search(emb, topn_amplo)
 
-    resultados = []
+    candidatos = []
     for j, i in enumerate(idxs[0]):
         if i < len(state["chunks"]):
-            texto_limpo = limpar_texto(state["chunks"][i])
-            score = max(0, round(100 - float(dists[0][j]) * 8))
-            fonte = state["metas"][i] if state["metas"] else "Desconhecido"
-            resultados.append(TrechoResult(ordem=j+1, texto=texto_limpo, fonte=fonte, score=score))
+            candidatos.append({
+                "idx": i,
+                "texto": limpar_texto(state["chunks"][i]),
+                "fonte": state["metas"][i] if state["metas"] else "Desconhecido",
+                "faiss_score": float(dists[0][j])
+            })
+            
+    # Fase 2: Cross-Encoder ReRanking
+    # Avalia (Pergunta + Chunk) de forma bidirecional profunda
+    pairs = [[req.pergunta, c["texto"]] for c in candidatos]
+    if pairs:
+        cross_scores = state["reranker"].predict(pairs)
+        for c, score in zip(candidatos, cross_scores):
+            c["cross_score"] = float(score)
+            
+        # Ordena do maior pro menor cross_score
+        candidatos.sort(key=lambda x: x["cross_score"], reverse=True)
+        
+    candidatos_finais = candidatos[:topn]
+
+    resultados = []
+    for j, c in enumerate(candidatos_finais):
+        # Transforma o logit do score num "falso percentual" de confianca para a UI
+        score_visual = min(100, max(20, int(50 + (c["cross_score"] * 5))))
+        resultados.append(TrechoResult(
+            ordem=j+1, 
+            texto=c["texto"], 
+            fonte=c["fonte"], 
+            score=score_visual
+        ))
 
     # Síntese
     sintese = None
@@ -355,7 +392,7 @@ async def buscar(req: ConsultaRequest):
 if __name__ == "__main__":
     import uvicorn
     print("=" * 55)
-    print("  OTTO ORL — Servidor RAG v3")
+    print("  OTTO ORL — Servidor RAG v4 (Re-Ranker)")
     print("  http://localhost:8000")
     print("  Docs: http://localhost:8000/docs")
     print("=" * 55)

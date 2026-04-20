@@ -1,56 +1,37 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-function formatSintese(txt) {
-  const topicRegex = /(?:^|\n)(\d+\.\s*\*\*.*?\*\*)/g;
-  if (!txt.match(topicRegex)) {
-    let replaced = txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    replaced = replaced.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
-    replaced = replaced.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`);
-    replaced = replaced.replace(/\n\n/g, '<br><br>');
-    return `<p>${replaced}</p>`;
-  }
-
-  const parts = txt.split(topicRegex).map(p => p.trim()).filter(Boolean);
-  let html = '';
-
-  for (let i = 0; i < parts.length; i++) {
-    let part = parts[i];
-    const isHeader = part.match(/^\d+\.\s*\*\*(.*?)\*\*/);
-
-    if (isHeader) {
-      let title = isHeader[1].replace(/:$/, '').trim();
-      let content = (parts[i + 1] && !parts[i + 1].match(/^\d+\.\s*\*\*/)) ? parts[++i] : "Sem informações.";
-
-      content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      content = content.replace(/^[•\-]\s+(.+)$/gm, '<li>$1</li>');
-      content = content.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul style="margin-left:8px">${m}</ul>`);
-      content = content.replace(/\n\n/g, '<br><br>');
-
-      let blockClass = 'clin-default';
-      let icon = '📌';
-      let lowTitle = title.toLowerCase();
-
-      if (lowTitle.includes('impressão')) { blockClass = 'clin-impressao'; icon = '🧑‍⚕️'; }
-      else if (lowTitle.includes('diagnóstico')) { blockClass = 'clin-default'; icon = '🔍'; }
-      else if (lowTitle.includes('exame')) { blockClass = 'clin-default'; icon = '🧪'; }
-      else if (lowTitle.includes('conduta')) { blockClass = 'clin-conduta'; icon = '📋'; }
-      else if (lowTitle.includes('alerta') || lowTitle.includes('red flag')) { blockClass = 'clin-alerta'; icon = '🚨'; }
-      else if (lowTitle.includes('referência')) { blockClass = 'clin-default'; icon = '📖'; }
-
-      html += `<div class="clin-block ${blockClass}">
-        <div class="clin-block-title">${icon} ${title}</div>
-        <div class="clin-block-content">${content}</div>
-      </div>`;
-    } else {
-      let replaced = part.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      html += `<div style="margin-bottom:12px; font-weight:500; color:var(--text-2)">${replaced}</div>`;
+const MarkdownComponents = {
+  blockquote: ({ node, children, ...props }) => {
+    // Pegar o texto bruto pra saber se tem alerta GitHub
+    const textContent = String(children).toUpperCase();
+    if (textContent.includes('[!WARNING]') || textContent.includes('[!ALERTA]')) {
+      return (
+        <div className="clin-block clin-alerta">
+          <div className="clin-block-title">🚨 ALERTA CLÍNICO</div>
+          <div className="clin-block-content">{children}</div>
+        </div>
+      );
     }
-  }
-  return html;
-}
+    if (textContent.includes('[!NOTE]') || textContent.includes('[!NOTA]')) {
+      return (
+        <div className="clin-block clin-conduta">
+          <div className="clin-block-title">📋 NOTA CLÍNICA</div>
+          <div className="clin-block-content">{children}</div>
+        </div>
+      );
+    }
+    return <blockquote className="clin-blockquote" {...props}>{children}</blockquote>;
+  },
+  ul: ({node, children, ...props}) => <ul style={{ marginLeft: '16px', marginBottom: '8px' }} {...props}>{children}</ul>,
+  li: ({node, children, ...props}) => <li style={{ marginBottom: '4px' }} {...props}>{children}</li>,
+  p: ({node, children, ...props}) => <p style={{ marginBottom: '12px' }} {...props}>{children}</p>
+};
+
 
 function humanizarNome(nome) {
   return nome
@@ -239,7 +220,7 @@ export default function App() {
       {/* Sidebar Lateral */}
       <aside className="claude-sidebar">
         <div className="logo-container">
-          <div className="logo-icon">🐬</div>
+          <div className="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide-book-open"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
           <div className="logo-title">OTOCONSULT RAG</div>
         </div>
 
@@ -318,7 +299,12 @@ export default function App() {
                   <div className="ai-avatar">OT</div>
                   <div className="ai-content">
                     {data.sintese ? (
-                      <div dangerouslySetInnerHTML={{ __html: formatSintese(data.sintese) }} />
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]} 
+                        components={MarkdownComponents}
+                      >
+                        {data.sintese}
+                      </ReactMarkdown>
                     ) : (
                        <span>Buscando diretamente no acervo...</span>
                     )}

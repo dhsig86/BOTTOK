@@ -33,11 +33,17 @@ BIBLIOTECA_DIR = os.path.join(BOOKS_DIR, "biblioteca")
 INDEX_PATH  = os.path.join(BOOKS_DIR, "orl_index.faiss")
 CHUNKS_PATH = os.path.join(BOOKS_DIR, "orl_chunks.pkl")
 META_PATH   = os.path.join(BOOKS_DIR, "orl_meta.pkl")   # guarda de qual livro vem cada chunk
-MODEL_NAME  = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_MAX_SIZE = 1600   # aumentado para melhor contexto semântico do LLM
-CHUNK_OVERLAP  = 300
-# Arquivos a ignorar (nao sao livros)
-IGNORAR = {"indexar_livro.py", "perguntar.py"}
+
+# Usando MiniLM-L12-v2 para garantir compatibilidade de memória (Evitar crash do backend)
+MODEL_NAME  = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2" 
+CHUNK_MAX_SIZE = 1800   # Aumentado para melhor contexto.
+CHUNK_OVERLAP  = 400
+# Arquivos a ignorar (nao sao livros ou estão corrompidos gerando C-Level SegFault)
+IGNORAR = {
+    "indexar_livro.py", 
+    "perguntar.py",
+    "Endoscopic dacryocystorhinostomy _DCR_ surgical technique.pdf"
+}
 # -----------------------------------------------------------------------------
 
 def listar_pdfs(pasta: str) -> list[str]:
@@ -97,7 +103,10 @@ def criar_chunks_inteligentes(paginas: list[str], max_size: int, overlap: int, f
     
     chunks = []
     metas = []
-    bloco_atual = ""
+    
+    # Injeta a fonte como base do contexto no chunk atual
+    prefixo_fonte = f"[LIVRO-TEXTO: {fonte.replace('.pdf', '')}] "
+    bloco_atual = prefixo_fonte
     
     for para in paragrafos:
         para = para.strip()
@@ -109,23 +118,24 @@ def criar_chunks_inteligentes(paginas: list[str], max_size: int, overlap: int, f
             frases = re.split(r'(?<=[.!?])\s+', para)
             for frase in frases:
                 if len(bloco_atual) + len(frase) <= max_size:
-                    bloco_atual += (" " + frase if bloco_atual else frase)
+                    bloco_atual += (" " + frase)
                 else:
-                    if bloco_atual:
+                    if bloco_atual.strip() != prefixo_fonte.strip():
                         chunks.append(bloco_atual.strip())
                         metas.append(fonte)
-                    bloco_atual = frase
+                    bloco_atual = prefixo_fonte + frase
             continue
             
         if len(bloco_atual) + len(para) <= max_size:
-            bloco_atual += ("\n\n" + para if bloco_atual else para)
+            bloco_atual += ("\n\n" + para if bloco_atual != prefixo_fonte else para)
         else:
-            chunks.append(bloco_atual.strip())
-            metas.append(fonte)
-            # overlap estrutural
-            bloco_atual = para
+            if bloco_atual.strip() != prefixo_fonte.strip():
+                chunks.append(bloco_atual.strip())
+                metas.append(fonte)
+            # overlap estrutural injeta a fonte de novo
+            bloco_atual = prefixo_fonte + para
             
-    if bloco_atual:
+    if bloco_atual.strip() != prefixo_fonte.strip():
         chunks.append(bloco_atual.strip())
         metas.append(fonte)
         
@@ -136,12 +146,19 @@ def gerar_embeddings(chunks: list[str], model_name: str):
     print(f"\n[MODELO] {model_name}")
     modelo = SentenceTransformer(model_name)
     print(f"Gerando embeddings para {len(chunks)} chunks (CPU — pode demorar)...")
-    embeddings = modelo.encode(
-        chunks,
-        show_progress_bar=True,
-        batch_size=32,
-        convert_to_numpy=True
-    )
+    # Pre-alocar array numpy de embeddings reduz o uso de memoria em 3x (Evita OOM)
+    dim = 384 # Dimensao do MiniLM-L12
+    total = len(chunks)
+    embeddings = np.zeros((total, dim), dtype="float32")
+    
+    batch_size = 32
+    for i in range(0, total, batch_size):
+        batch = chunks[i:i+batch_size]
+        batch_emb = modelo.encode(batch, show_progress_bar=False, convert_to_numpy=True)
+        embeddings[i:i+len(batch)] = batch_emb
+        if (i + len(batch)) % 128 == 0 or (i + len(batch)) >= total:
+            print(f"  -> Vetores criados: {min(i+len(batch), total)} / {total}", flush=True)
+            
     return np.array(embeddings, dtype="float32")
 
 def main():

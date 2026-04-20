@@ -20,7 +20,7 @@
 }
 html { scroll-behavior: smooth; }
 body { 
-  font-family: 'Inter', system-ui, sans-serif; 
+  font-family: 'Inter', sans-serif; 
   background: var(--bg-app); 
   color: var(--text-primary); 
   height: 100vh; 
@@ -261,7 +261,7 @@ textarea {
   border: none;
   background: transparent;
   outline: none;
-  font-family: inherit;
+  font-family: 'Inter', sans-serif;
   font-size: 15px;
   line-height: 1.5;
   color: var(--text-primary);
@@ -323,7 +323,20 @@ textarea::placeholder { color: var(--text-muted); }
 /* Elementos Clínicos Internos da IA */
 .clin-block { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: white; }
 .clin-alerta { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.02); }
+.clin-alerta .clin-block-title { color: #ef4444; }
+.clin-conduta { border-color: rgba(59, 130, 246, 0.3); background: rgba(59, 130, 246, 0.02); }
+.clin-conduta .clin-block-title { color: #3b82f6; }
 .clin-block-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px; }
+.clin-blockquote {
+  border-left: 3px solid var(--border-focus);
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 12px 0;
+  background: var(--bg-sidebar);
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+}
 
 @media (max-width: 768px) {
   .claude-layout { flex-direction: column; }

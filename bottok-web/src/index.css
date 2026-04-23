@@ -24,6 +24,7 @@ body {
   background: var(--bg-app); 
   color: var(--text-primary); 
   height: 100vh; 
+  height: 100dvh;
   overflow: hidden;
   display: flex; 
   flex-direction: column; 
@@ -31,8 +32,8 @@ body {
 
 #root {
   display: flex;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
 }
 
 /* Layout Principal Estilo Claude */
@@ -149,7 +150,6 @@ body {
   padding: 40px 20px 160px 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
 .claude-chat-history::-webkit-scrollbar { width: 6px; }
 .claude-chat-history::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
@@ -158,7 +158,7 @@ body {
   width: 100%;
   max-width: 768px; /* Classic Claude Width */
   display: flex;
-  margin-bottom: 32px;
+  margin: 0 auto 32px auto;
   animation: fadeIn 0.3s ease;
 }
 
@@ -204,7 +204,7 @@ body {
 .ai-content p { margin-bottom: 12px; }
 
 /* Empty state */
-.empty-state { text-align: center; margin-top: 10vh; color: var(--text-secondary); max-width: 500px; }
+.empty-state { text-align: center; margin: 10vh auto 0 auto; color: var(--text-secondary); max-width: 500px; }
 .empty-state-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.8; }
 .empty-state h2 { font-size: 24px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
 
@@ -338,10 +338,54 @@ textarea::placeholder { color: var(--text-muted); }
   border-radius: 0 4px 4px 0;
 }
 
+/* Mobile Filter Bar — hidden on desktop */
+.mobile-filter-bar {
+  display: none;
+}
+.mobile-chip {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-chip.active {
+  background: var(--accent-glow);
+  color: var(--accent-dim);
+  border-color: rgba(29, 158, 117, 0.3);
+  font-weight: 600;
+}
+.mobile-chip:active { opacity: 0.75; }
+
 @media (max-width: 768px) {
   .claude-layout { flex-direction: column; }
-  .claude-sidebar { display: none; } /* Oculto mobile por enquanto */
-  .message-wrapper { padding: 0 16px; }
-  .claude-chat-history { padding: 20px 0 140px 0; }
-  .input-anchored { padding: 12px; }
+  .claude-sidebar { display: none; }
+
+  /* Horizontal chip filter strip */
+  .mobile-filter-bar {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .mobile-filter-bar::-webkit-scrollbar { display: none; }
+
+  .status-indicator { top: 10px; right: 14px; font-size: 11px; }
+  .message-wrapper { padding: 0 14px; }
+  .claude-chat-history { padding: 16px 0 140px 0; }
+  .input-anchored { padding: 10px 12px; }
+  .input-wrapper { border-radius: 16px; }
 }

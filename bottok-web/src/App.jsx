@@ -259,6 +259,26 @@ export default function App() {
 
       {/* Main Área Estilo Claude */}
       <main className="claude-main">
+
+        {/* Mobile-only horizontal filter strip */}
+        <div className="mobile-filter-bar">
+          {TEMAS.map(tema => (
+            <div
+              key={tema.n}
+              className={`mobile-chip ${contextoTema?.n === tema.n ? 'active' : ''}`}
+              onClick={() => selecionarTema(tema)}
+            >
+              {tema.t}
+            </div>
+          ))}
+          <div
+            className={`mobile-chip ${contextoTema?.n === '00' ? 'active' : ''}`}
+            onClick={() => selecionarTema({ n: '00', t: 'Geral' })}
+          >
+            Geral (Sem Filtro)
+          </div>
+        </div>
+
         <div className="status-indicator">
            <div className={`dot ${status.state}`}></div>
            {status.state === 'carregando' ? status.error || 'Aguardando Servidor...' : 'Online & Conectado'}

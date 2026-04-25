@@ -406,15 +406,20 @@ textarea::placeholder { color: var(--text-muted); }
     flex-shrink: 0;
   }
 
-  /* Área de mensagens */
-  .chat-history {
+  /* Área de mensagens — overflow não deve ser hidden pois bloqueia scroll filho no iOS */
+  .claude-main {
+    min-height: 0;
+  }
+
+  .claude-chat-history {
     flex: 1;
     overflow-y: auto;
     padding: 16px 12px 150px 12px;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    min-height: 0;
   }
-  .chat-history::-webkit-scrollbar { display: none; }
+  .claude-chat-history::-webkit-scrollbar { display: none; }
 
   /* Balões */
   .msg-user, .msg-bot {

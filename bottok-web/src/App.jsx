@@ -64,6 +64,39 @@ const TEMAS = [
   { n: '20', t: 'Atualizações ORL' },
 ];
 
+const PROMPT_TEMPLATES = [
+  {
+    icon: '🔍',
+    label: 'Diagnóstico Diferencial',
+    text: 'Quais são os principais diagnósticos diferenciais para otalgia unilateral com otoscopia normal no adulto?',
+  },
+  {
+    icon: '💊',
+    label: 'Conduta Terapêutica',
+    text: 'Qual o protocolo de tratamento para otite média aguda bacteriana em adulto sem comorbidades?',
+  },
+  {
+    icon: '⚡',
+    label: 'Emergência ORL',
+    text: 'Qual a conduta imediata para epistaxe posterior refratária à compressão local?',
+  },
+  {
+    icon: '🎯',
+    label: 'Posologia',
+    text: 'Qual a dose e duração do amoxicilina-clavulanato para sinusite bacteriana aguda?',
+  },
+  {
+    icon: '🏥',
+    label: 'Indicação Cirúrgica',
+    text: 'Quais são as indicações de timpanoplastia e os critérios de sucesso cirúrgico?',
+  },
+  {
+    icon: '👂',
+    label: 'Audiologia',
+    text: 'Como interpretar uma audiometria com rebaixamento bilateral em altas frequências e qual conduta?',
+  },
+];
+
 export default function App() {
   const [status, setStatus] = useState({ state: 'carregando', error: null });
   const [stats, setStats] = useState({ total_chunks: '—', n_livros: '—', llm_mode: 'none', livros: [] });
@@ -290,6 +323,27 @@ export default function App() {
               <div className="empty-state-icon">🐬</div>
               <h2>Como posso te ajudar hoje doutor?</h2>
               <p>O OTOCONSULT pesquisa diretamente em livros didáticos de residentes e manuais técnicos para formatar sua conduta. Selecione um TEMA na lateral para guiar a lógica matemática de varredura.</p>
+              <div className="template-grid">
+                {PROMPT_TEMPLATES.map((tpl, i) => (
+                  <button
+                    key={i}
+                    className="template-card"
+                    onClick={() => {
+                      setQuery(tpl.text);
+                      setTimeout(() => {
+                        if (inputRef.current) {
+                          inputRef.current.style.height = 'auto';
+                          inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 180) + 'px';
+                          inputRef.current.focus();
+                        }
+                      }, 50);
+                    }}
+                  >
+                    <span className="template-card-icon">{tpl.icon}</span>
+                    <span className="template-card-label">{tpl.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -337,45 +391,4 @@ export default function App() {
           })}
 
           {buscando && (
-            <div className="message-wrapper message-ai" style={{ opacity: 0.7 }}>
-              <div className="ai-avatar" style={{ animation: 'blink 1.5s infinite'}}>...</div>
-              <div className="ai-content">Ponderando referências em {stats.n_livros} obras...</div>
-            </div>
-          )}
-        </div>
-
-        <div className="input-anchored">
-          <div className={`input-wrapper ${focused ? 'focused' : ''}`}>
-             {contextoTema && (
-               <div className="context-badge">
-                 Filtro Ativo: {contextoTema.t}
-                 <span className="context-close" onClick={() => setContextoTema(null)}>✕</span>
-               </div>
-             )}
-             <div className="input-row">
-                <textarea
-                  ref={inputRef}
-                  value={query}
-                  onChange={e => { setQuery(e.target.value); autoResize(e); }}
-                  onKeyDown={handleKey}
-                  onFocus={() => setFocused(true)}
-                  onBlur={() => setFocused(false)}
-                  placeholder="Escreva seu caso ou dúvida técnica..."
-                  rows="1"
-                ></textarea>
-                <button className="btn-send" onClick={buscar} disabled={buscando || status.state !== 'ok' || (!query.trim())}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                  </svg>
-                </button>
-             </div>
-          </div>
-        </div>
-        <div className="input-hint" style={{ position: 'absolute', bottom: '8px', width: '100%', left: 0 }}>
-          Pressione Enter para buscar. Shift + Enter para quebrar linha. O OTOCONSULT pode cometer erros. Revise condutas.
-        </div>
-      </main>
-    </div>
-  );
-}
+            <div className="message

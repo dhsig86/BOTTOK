@@ -50,20 +50,24 @@ GROQ_MODEL = "llama-3.1-8b-instant"   # mais econômico e rápido do free tier G
 
 # ── Prompts para LLM ─────────────────────────────────────────────────────────
 # Persona fixa enviada como role 'system' — define QUEM o modelo é
-SYSTEM_PROMPT = """Você é OTOCONSULT, um assistente de inteligência e suporte à decisão clínica especializado estritamente em Otorrinolaringologia.
-Sua missão é responder à dúvida clínica formatando e sumarizando APENAS as informações enviadas pelo RAG no campo [REFERÊNCIAS INDEXADAS].
+SYSTEM_PROMPT = """Você é OTOCONSULT, assistente de suporte à decisão clínica especializado em Otorrinolaringologia.
+Sua missão é responder à dúvida clínica sintetizando EXCLUSIVAMENTE as informações das [REFERÊNCIAS INDEXADAS] fornecidas.
 
-[DIRETRIZES FUNDAMENTAIS]:
-1. TOM E POSTURA: Expresse-se como um médico especialista chefe formal, direto, sem saudações desnecessárias. Vá direto ao ponto. 
-2. CITAÇÃO ESTRITA: É absolutamente proibido inventar diagnósticos, tratamentos ou citar literaturas que não estão listadas nas referências abaixo. Se a informação não constar explicitamente no contexto, declare com clareza: "Com base no acervo disponibilizado, não foi encontrada essa informação."
-3. FOCO: Leia a pergunta e determine qual a necessidade (lista de diferenciais, procedimento cirúrgico, posologia). 
-4. ESTRUTURA VISUAL: Responda usando Markdown impecável.
-   - Use formatação de blockquotes do GitHub para alertas severos de conduta, como `> [!WARNING]` seguido de **ALERTA CLÍNICO:**.
-   - Use `> [!NOTE]` para observações.
-   - Use listas e negrito. Nunca misture estilos de forma errática.
+[REGRAS ABSOLUTAS]:
+1. FONTES ÚNICAS: Nunca cite o mesmo livro ou referência mais de uma vez. Se houver múltiplos trechos da mesma obra, consolide-os em um único parágrafo. A repetição de fontes é proibida.
+2. CITAÇÃO ESTRITA: É proibido inventar diagnósticos, tratamentos, doses ou procedimentos não presentes nas referências. Se a informação não constar no contexto, declare: "Com base no acervo disponibilizado, não foi encontrada essa informação."
+3. TOM: Médico especialista chefe — formal, direto, sem saudações ou introduções genéricas. Vá direto ao conteúdo clínico.
+4. FOCO CLÍNICO: Identifique a natureza da dúvida (diagnóstico diferencial, conduta terapêutica, posologia, técnica cirúrgica, critério de internação) e estruture a resposta em torno disso.
+5. ESTRUTURA MARKDOWN:
+   - Use `> [!WARNING]` + **ALERTA CLÍNICO:** para alertas graves de conduta ou segurança.
+   - Use `> [!NOTE]` para observações pertinentes.
+   - Use **negrito** para diagnósticos, fármacos, doses e achados-chave.
+   - Use listas ordenadas para protocolos sequenciais; listas simples para diferenciais.
+   - Máximo 3 níveis de hierarquia. Sem repetição de conteúdo entre seções.
+   - Ao final, inclua uma seção `## Fontes Consultadas` listando apenas os títulos das obras citadas (sem repetição).
 
 [DADOS]
-Baseie toda e qualquer afirmação unicamente nas evidências expostas abaixo. Sintentize, mas nunca extrapole."""
+Baseie toda afirmação unicamente nas evidências expostas abaixo. Sintetize com precisão — nunca extrapole além do que está escrito."""
 
 # Template enviado como role 'user' — define O QUE processar
 USER_TEMPLATE = """REFERÊNCIAS INDEXADAS:
@@ -175,7 +179,7 @@ async def sintetizar_groq(contexto: str, pergunta: str) -> str:
                     {"role": "user",   "content": user_content},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "top_p": 0.9,
             }
         )
@@ -359,8 +363,19 @@ async def buscar(req: ConsultaRequest):
             
         # Ordena do maior pro menor cross_score
         candidatos.sort(key=lambda x: x["cross_score"], reverse=True)
-        
-    candidatos_finais = candidatos[:topn]
+
+    # Deduplicação por fonte: máximo 2 chunks por livro/fonte para evitar
+    # que uma única obra domine todas as referências da resposta
+    seen_fontes: dict[str, int] = {}
+    candidatos_dedup = []
+    for c in candidatos:
+        fonte = c["fonte"]
+        count = seen_fontes.get(fonte, 0)
+        if count < 2:
+            candidatos_dedup.append(c)
+            seen_fontes[fonte] = count + 1
+
+    candidatos_finais = candidatos_dedup[:topn]
 
     resultados = []
     for j, c in enumerate(candidatos_finais):
@@ -370,30 +385,4 @@ async def buscar(req: ConsultaRequest):
             ordem=j+1, 
             texto=c["texto"], 
             fonte=c["fonte"], 
-            score=score_visual
-        ))
-
-    # Síntese
-    sintese = None
-    if req.sintetizar and resultados:
-        trechos_dict = [{"texto": r.texto, "fonte": r.fonte} for r in resultados]
-        sintese = await sintetizar(req.pergunta, trechos_dict)
-
-    return ConsultaResponse(
-        pergunta=req.pergunta,
-        sintese=sintese,
-        llm_usado=state["llm_mode"] or "none",
-        resultados=resultados,
-        total_chunks=state["index"].ntotal,
-        n_livros=len(set(state["metas"])) if state["metas"] else 0,
-    )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    print("=" * 55)
-    print("  OTTO ORL — Servidor RAG v4 (Re-Ranker)")
-    print("  http://localhost:8000")
-    print("  Docs: http://localhost:8000/docs")
-    print("=" * 55)
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=False, log_level="warning")
+            score=score_vi

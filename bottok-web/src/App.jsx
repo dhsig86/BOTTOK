@@ -7,7 +7,6 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const MarkdownComponents = {
   blockquote: ({ node, children, ...props }) => {
-    // Pegar o texto bruto pra saber se tem alerta GitHub
     const textContent = String(children).toUpperCase();
     if (textContent.includes('[!WARNING]') || textContent.includes('[!ALERTA]')) {
       return (
@@ -102,8 +101,8 @@ export default function App() {
   const [stats, setStats] = useState({ total_chunks: '—', n_livros: '—', llm_mode: 'none', livros: [] });
   const [history, setHistory] = useState([]);
   const [query, setQuery] = useState('');
-  const [contextoTema, setContextoTema] = useState(null); // Armazena o tema selecionado
-  const [topn, setTopn] = useState(6); // Default 6
+  const [contextoTema, setContextoTema] = useState(null);
+  const [topn, setTopn] = useState(6);
   const [buscando, setBuscando] = useState(false);
   const [focused, setFocused] = useState(false);
   const resultsRef = useRef(null);
@@ -114,7 +113,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Scroll to bottom when history changes
     if (resultsRef.current) {
       resultsRef.current.scrollTop = resultsRef.current.scrollHeight;
     }
@@ -156,7 +154,6 @@ export default function App() {
   };
 
   const handleKey = (e) => {
-    // Nova regra: Enter envia. Shift+Enter quebra linha.
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       buscar();
@@ -175,7 +172,6 @@ export default function App() {
     setQuery('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    // UI payload
     const finalQuestionText = contextoTema ? `[Tema: ${contextoTema.t}] ${pergunta}` : pergunta;
     const newQueryItem = { type: 'query', text: pergunta, temaVisual: contextoTema?.t };
 
@@ -189,7 +185,6 @@ export default function App() {
     setBuscando(true);
 
     try {
-      // Backend request
       const res = await fetch(`${API}/buscar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -391,4 +386,45 @@ export default function App() {
           })}
 
           {buscando && (
-            <div className="message
+            <div className="message-wrapper message-ai" style={{ opacity: 0.7 }}>
+              <div className="ai-avatar" style={{ animation: 'blink 1.5s infinite'}}>...</div>
+              <div className="ai-content">Ponderando referências em {stats.n_livros} obras...</div>
+            </div>
+          )}
+        </div>
+
+        <div className="input-anchored">
+          <div className={`input-wrapper ${focused ? 'focused' : ''}`}>
+             {contextoTema && (
+               <div className="context-badge">
+                 Filtro Ativo: {contextoTema.t}
+                 <span className="context-close" onClick={() => setContextoTema(null)}>✕</span>
+               </div>
+             )}
+             <div className="input-row">
+                <textarea
+                  ref={inputRef}
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); autoResize(e); }}
+                  onKeyDown={handleKey}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  placeholder="Escreva seu caso ou dúvida técnica..."
+                  rows="1"
+                ></textarea>
+                <button className="btn-send" onClick={buscar} disabled={buscando || status.state !== 'ok' || (!query.trim())}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+             </div>
+          </div>
+        </div>
+        <div className="input-hint" style={{ position: 'absolute', bottom: '8px', width: '100%', left: 0 }}>
+          Pressione Enter para buscar. Shift + Enter para quebrar linha. O OTOCONSULT pode cometer erros. Revise condutas.
+        </div>
+      </main>
+    </div>
+  );
+}
